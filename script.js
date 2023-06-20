@@ -1,173 +1,114 @@
-const express = require('express');
-const multer = require('multer');
-const path = require('path');
-const session = require('express-session');
-const MongoDBStore = require('connect-mongodb-session')(session);
-const mongoose = require('mongoose');
+// Define file and user data as shown in the previous code
 
-const app = express();
-const port = 3000;
+// Helper function to display file information
+function displayFileList(files) {
+  const fileList = document.getElementById('file-list');
+  fileList.innerHTML = '';
 
-// Configure session store
-const store = new MongoDBStore({
-  uri: 'mongodb://localhost:27017/session-store', // Replace with your MongoDB connection string
-  collection: 'sessions'
-});
+  files.forEach(file => {
+    const listItem = document.createElement('li');
+    const fileImage = document.createElement('img');
+    fileImage.src = 'file-icon.png'; // Replace with your file icon image
+    fileImage.alt = 'File Icon';
+    const fileInfo = document.createElement('div');
+    fileInfo.classList.add('file-info');
+    const fileName = document.createElement('span');
+    fileName.textContent = file.name;
+    const filePrice = document.createElement('span');
+    filePrice.classList.add('file-price');
+    filePrice.textContent = `${file.price} Coins`;
+    const downloadButton = document.createElement('a');
+    downloadButton.href = `/purchase/${file._id}`;
+    downloadButton.textContent = 'Download';
+    downloadButton.setAttribute('download', '');
+    downloadButton.setAttribute('target', '_blank');
 
-// Connect to MongoDB database
-mongoose.connect('mongodb://localhost:27017/file-downloads', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-});
-const db = mongoose.connection;
-db.on('error', console.error.bind(console, 'MongoDB connection error:'));
-db.once('open', () => {
-  console.log('Connected to MongoDB');
-});
-
-// Configure file storage using multer
-const storage = multer.diskStorage({
-  destination: './uploads',
-  filename: (req, file, cb) => {
-    const filename = `${Date.now()}_${file.originalname}`;
-    cb(null, filename);
-  }
-});
-
-const upload = multer({ storage });
-
-// Define file and user models using Mongoose
-const fileSchema = new mongoose.Schema({
-  name: String,
-  price: Number,
-  filename: String
-});
-
-const File = mongoose.model('File', fileSchema);
-
-const userSchema = new mongoose.Schema({
-  username: String,
-  password: String,
-  balance: Number
-});
-
-const User = mongoose.model('User', userSchema);
-
-// Set up session middleware
-app.use(session({
-  secret: 'your_secret_key', // Replace with your own secret key
-  resave: false,
-  saveUninitialized: true,
-  store
-}));
-
-// Parse request bodies
-app.use(express.urlencoded({ extended: true }));
-
-// Serve static files
-app.use(express.static('public'));
-
-// Handle file upload
-app.post('/upload', upload.single('file'), (req, res) => {
-  const { name, price } = req.body;
-  const { filename } = req.file;
-
-  const file = new File({
-    name,
-    price,
-    filename
+    fileInfo.appendChild(fileImage);
+    fileInfo.appendChild(fileName);
+    listItem.appendChild(fileInfo);
+    listItem.appendChild(filePrice);
+    listItem.appendChild(downloadButton);
+    fileList.appendChild(listItem);
   });
+}
 
-  file.save((err, savedFile) => {
-    if (err) {
-      console.error(err);
-      res.sendStatus(500);
-    } else {
-      res.redirect('/files');
-    }
-  });
+// Helper function to display user information
+function displayUserInfo(username, balance) {
+  const userInfo = document.getElementById('user-info');
+  userInfo.textContent = `Logged in as ${username}. Balance: ${balance} Coins`;
+}
+
+// Helper function to display error message
+function displayErrorMessage(message) {
+  const errorMessage = document.getElementById('error-message');
+  errorMessage.textContent = message;
+}
+
+// Handle login form submission
+const loginForm = document.getElementById('login-form');
+loginForm.addEventListener('submit', event => {
+  event.preventDefault();
+  const usernameInput = document.getElementById('username');
+  const passwordInput = document.getElementById('password');
+
+  const formData = new FormData();
+  formData.append('username', usernameInput.value);
+  formData.append('password', passwordInput.value);
+
+  fetch('/login', {
+    method: 'POST',
+    body: formData
+  })
+    .then(response => {
+      if (response.ok) {
+        window.location.href = '/files';
+      } else if (response.status === 401) {
+        displayErrorMessage('Invalid username or password.');
+      } else {
+        displayErrorMessage('An error occurred. Please try again later.');
+      }
+    })
+    .catch(error => {
+      console.error(error);
+      displayErrorMessage('An error occurred. Please try again later.');
+    });
 });
 
-// Handle user login
-app.post('/login', (req, res) => {
-  const { username, password } = req.body;
-
-  User.findOne({ username, password }, (err, user) => {
-    if (err) {
-      console.error(err);
-      res.sendStatus(500);
-    } else if (user) {
-      req.session.username = username;
-      res.redirect('/files');
-    } else {
-      res.sendStatus(401);
-    }
-  });
+// Handle logout button click
+const logoutButton = document.getElementById('logout-btn');
+logoutButton.addEventListener('click', () => {
+  fetch('/logout')
+    .then(response => {
+      if (response.ok) {
+        window.location.href = '/';
+      } else {
+        displayErrorMessage('An error occurred. Please try again later.');
+      }
+    })
+    .catch(error => {
+      console.error(error);
+      displayErrorMessage('An error occurred. Please try again later.');
+    });
 });
 
-// Handle user logout
-app.get('/logout', (req, res) => {
-  req.session.destroy(() => {
-    res.redirect('/');
-  });
-});
-
-// Handle file listing and download
-app.get('/files', (req, res) => {
-  if (!req.session.username) {
-    res.redirect('/');
-    return;
-  }
-
-  File.find({}, (err, files) => {
-    if (err) {
-      console.error(err);
-      res.sendStatus(500);
-    } else {
-      res.render('files', {
-        username: req.session.username,
-        files
-      });
-    }
-  });
-});
-
-// Handle file purchase
-app.get('/purchase/:id', (req, res) => {
-  const { id } = req.params;
-
-  if (!req.session.username) {
-    res.redirect('/');
-    return;
-  }
-
-  File.findById(id, (err, file) => {
-    if (err) {
-      console.error(err);
-      res.sendStatus(500);
-    } else if (!file) {
-      res.sendStatus(404);
-    } else {
-      User.findOne({ username: req.session.username }, (err, user) => {
-        if (err) {
-          console.error(err);
-          res.sendStatus(500);
-        } else if (!user || user.balance < file.price) {
-          res.sendStatus(403);
-        } else {
-          // Deduct the file price from the user's balance
-          user.balance -= file.price;
-          user.save();
-
-          // Provide the file download
-          const fileLocation = path.join(__dirname, 'uploads', file.filename);
-          res.download(fileLocation);
-        }
-      });
-    }
-  });
-});
-
-app.listen(port, () => {
-  console.log(`Server is running on http://localhost:${port}`);
-});
+// Fetch file list and user info on the files page
+if (window.location.pathname === '/files') {
+  fetch('/files')
+    .then(response => {
+      if (response.ok) {
+        return response.json();
+      } else {
+        displayErrorMessage('An error occurred. Please try again later.');
+      }
+    })
+    .then(data => {
+      if (data) {
+        displayFileList(data.files);
+        displayUserInfo(data.username, data.balance);
+      }
+    })
+    .catch(error => {
+      console.error(error);
+      displayErrorMessage('An error occurred. Please try again later.');
+    });
+}
